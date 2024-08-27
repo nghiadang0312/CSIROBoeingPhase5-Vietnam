@@ -225,7 +225,7 @@ def save_model(name_file, grid_search):
     print("Done!")
     
     
-def predict(model, ndvi, vh, vv):
+def predict(model, data_crs, ndvi, vh, vv):
     data_predict = []
     for i in range(ndvi.shape[1]):
         ndvi_tmp = ndvi.isel(y=i).values
@@ -237,13 +237,30 @@ def predict(model, ndvi, vh, vv):
     final_label = y_pred.reshape(ndvi.y.shape[0], ndvi.x.shape[0])
     
     final_xarray_save = xr.DataArray(final_label, dims=("y", "x"))
-    final_xarray_save = final_xarray_save.rio.write_crs(data.rio.crs)
+    final_xarray_save = final_xarray_save.rio.write_crs(data_crs)
 
-    x_values = average_ndvi.x.values
-    y_values = average_ndvi.y.values
+    x_values = ndvi.x.values
+    y_values = ndvi.y.values
 
     data_array = xr.DataArray(final_xarray_save,
                               coords={'x': x_values, 'y': y_values},
                               dims=['y', 'x'])
-    data_array = data_array.rio.write_crs(average_ndvi.rio.crs)
+    data_array = data_array.rio.write_crs(ndvi.rio.crs)
     return data_array
+
+
+def cut_according_shp(thuanhoa_path, average_ndvi, data_array):
+    gdf = gpd.read_file(thuanhoa_path)
+    gdf = gdf.to_crs(average_ndvi.rio.crs)
+    polygon_coords = list(gdf.geometry.values[0].exterior.coords)
+    polygon_coordinates = [(x, y) for x, y in polygon_coords]
+
+    geometries = [
+        {
+            'type': 'Polygon',
+            'coordinates': [polygon_coordinates]
+        }
+    ]
+    region_result = data_array.rio.clip(geometries, data_array.rio.crs, drop=False)
+    region_result = region_result.where(region_result >= 0, float('nan'))
+    return region_result

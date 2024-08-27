@@ -70,6 +70,7 @@ from matplotlib.colors import ListedColormap
 from holoviews import opts
 from datashader import reductions
 from bokeh.models.tickers import FixedTicker
+from rioxarray.merge import merge_arrays
 
 import joblib
 
@@ -264,3 +265,56 @@ def cut_according_shp(thuanhoa_path, average_ndvi, data_array):
     region_result = data_array.rio.clip(geometries, data_array.rio.crs, drop=False)
     region_result = region_result.where(region_result >= 0, float('nan'))
     return region_result
+
+
+def compare(KD_path, KetQuaPhanLoaiDat, CODE_MAP, HT_MAP):
+    gdf = gpd.read_file(KD_path, crs="EPSG:9209")
+    polygon = gdf.geometry.values
+    label = gdf.tenchu.values
+    ouput_image = rioxarray.open_rasterio(KetQuaPhanLoaiDat)
+    code_tq = HT_MAP["TQ"]["data"][0]
+    code_pnn = HT_MAP["PNN"]["data"][0]
+    result = {}
+    for key, values in HT_MAP.items():
+        print(f"process {key}")
+        array_list = []
+        for i in range(len(polygon)):
+            po = polygon[i]
+            lb = label[i]
+            code_lb = CODE_MAP.get(lb, code_tq)
+            try:
+                qr = ouput_image.rio.clip([po], "EPSG:9209")
+                if code_lb in values["data"]:
+                    if code_lb == code_pnn:
+                        qr = qr.where((qr != float(code_pnn)), np.nan)
+                        # qr = qr.where((qr != 3.0), np.nan)
+                    elif code_lb == code_tq:
+                        qr = qr.where((qr != float(code_pnn)), np.nan)
+                        qr = qr.where((qr != 3.0), np.nan)
+                    else: 
+                        qr = qr.where(qr != float(code_lb), np.nan)
+                else:
+                    qr.values[:, :, :] = np.nan
+                array_list.append(qr)
+            except Exception as e:
+               pass
+        result.update({key: array_list})
+    return result
+
+
+def save_result(result, HT_MAP):
+    # cmap = ListedColormap(colors)
+    save_path = "ThuanHoa/KetQua"
+    if not os.path.exists(save_path):
+        os.mkdir(save_path)
+
+    for k, v in result.items():
+        rs = merge_arrays(v, nodata = np.nan)
+        rs.rio.to_raster(f"{save_path}/{k}.tif")
+        print(f"save {save_path}/{k}.tif")
+        # img = rs.plot(cmap=cmap, add_colorbar=False)
+        # cbar = plt.colorbar(img)
+        # cbar.ax.set_yticklabels(labels)
+        # plt.title(f'{HT_MAP[k]["name"]}')
+        # plt.axis('off')
+        # plt.show()
